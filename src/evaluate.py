@@ -174,9 +174,9 @@ def main():
     (C.ART_DIR / "metrics.json").write_text(json.dumps(results, indent=2))
     log_iteration(results)
     for split in ["val", "test"]:
-        print(f"\n=== {split.upper()} — pronóstico cada {C.HORIZON*C.STEP_S//60} min (L/h) ===")
+        print(f"\n=== {split.upper()}: pronóstico cada {C.HORIZON*C.STEP_S//60} min (L/h) ===")
         print(pd.DataFrame(results["block"][split]).T.round(3).rename(index=LABELS).to_string())
-        print(f"--- {split.upper()} — litros por trayecto ---")
+        print(f"--- {split.upper()}: litros por trayecto ---")
         print(pd.DataFrame(results["trip"][split]).T.round(3).rename(index=LABELS).to_string())
     print("\nInferencia:", json.dumps(results["inference"], indent=1))
 

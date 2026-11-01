@@ -1,216 +1,146 @@
-# FuelWise AI — Predicción del consumo de combustible con LSTM y GRU
+# FuelWise AI
 
-Aplicación web que pronostica el consumo de combustible de vehículos de gasolina a partir de series
-temporales de conducción (velocidad, RPM, carga del motor y consumo histórico), compara redes **LSTM** y
-**GRU** contra métodos simples de referencia y traduce el error de predicción a **valor de negocio** al
-decidir cuánto combustible reservar por trayecto.
+Aplicación web que pronostica el consumo de combustible de un vehículo de gasolina cada 2 minutos durante un trayecto. Una red GRU hace el pronóstico y un asistente con Claude Haiku 5.5 responde en español preguntas del administrador de flota, como cuánto reservar o si alcanza una cantidad. El asistente toma cada cifra de herramientas que consultan el modelo, así que no inventa números.
 
-Datos: [Vehicle Energy Dataset (VED)](https://github.com/gsoh/VED), licencia Apache 2.0.
-Equipo: Mia Fuentes (23775) · Roberto Barreda (23354) — Deep Learning y Sistemas Inteligentes, UVG.
+CC3092 Deep Learning y Sistemas Inteligentes, sección 20, Universidad del Valle de Guatemala.
 
----
+| Integrante | Carné |
+|---|---|
+| Mia Fuentes | 23775 |
+| Roberto Barreda | 23354 |
 
-## 1. Inicio rápido (la app con los modelos ya entrenados)
+## Ejecutar la app
 
-El zip incluye `artifacts/` con los modelos entrenados y las predicciones de prueba, así que la app
-funciona **sin descargar el dataset y sin GPU**.
+Los modelos entrenados están en `artifacts/`. La app no necesita el dataset ni GPU.
 
 ```bash
-cd fuelwise
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+git clone https://github.com/miafuentes30/CC3092-PRY3.git
+cd CC3092-PRY3
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app/app.py
 ```
 
-Se abre en `http://localhost:8501`.
+En macOS o Linux, activar el entorno con `source .venv/bin/activate`. La app abre en `http://localhost:8501`.
 
-## 2. Reproducir todo el pipeline
+Para usar el asistente en vivo, copiar `.env.example` como `.env` y poner la llave de Anthropic. Sin llave, el asistente muestra respuestas guardadas para las preguntas sugeridas del trayecto que la app abre por defecto.
+
+## Reproducir las métricas
 
 ```bash
-python run_all.py            # descarga VED (~176 MB), preprocesa, entrena, evalúa y calcula el valor
-python run_all.py --quick    # prueba rápida: 25 % de los trayectos y 3 épocas
+python run_all.py
 ```
 
-O paso a paso:
+Descarga VED, unos 176 MB, y luego preprocesa, entrena, evalúa y calcula el modelo de valor. En CPU tarda unos 20 minutos. `python run_all.py --quick` hace una prueba corta. Para usar GPU en Colab está `notebooks/FuelWise.ipynb`.
 
-| Paso | Comando | Salida |
-|---|---|---|
-| Descarga | `python -m src.download_data` | `data/raw/` (54 CSV semanales, ~3 GB) |
-| Preprocesamiento | `python -m src.preprocess` | `data/processed/bins.parquet`, `trips.parquet`, `quality_report.json` |
-| Entrenamiento | `python -m src.train [--target residual\|direct]` | `artifacts/models/{lstm,gru}.pt`, `scaler.json`, `training_summary.json` |
-| Evaluación | `python -m src.evaluate` | `artifacts/metrics.json`, `blocks_*.parquet`, `trips_*.parquet`, `iterations.csv` |
-| Modelo de valor | `python -m src.value_model` | `artifacts/value_results.json`, `error_value_curve.csv` |
+Evaluación del asistente, con la llave en `.env`:
 
-**¿Se necesita GPU?** No es obligatoria. Los modelos son pequeños (41–54 mil parámetros).
-En CPU (2 núcleos) el entrenamiento de ambos modelos tomó ~9 min; el preprocesamiento ~6–8 min.
-Si quieren entrenar más rápido o probar más iteraciones, usen **Google Colab con GPU T4** y el notebook
-`notebooks/FuelWise_Colab.ipynb` (instrucciones abajo). El código usa CUDA automáticamente si existe.
-La app siempre corre en CPU (latencia < 1 ms por pronóstico).
-
-### Google Colab
-1. Abran `notebooks/FuelWise_Colab.ipynb` en Colab (Archivo → Subir notebook).
-2. `Entorno de ejecución → Cambiar tipo de entorno de ejecución → T4 GPU`.
-3. Ejecuten las celdas: suben `fuelwise.zip`, corre `run_all.py` y se descarga `artifacts.zip`.
-4. Descompriman `artifacts.zip` dentro de su carpeta `fuelwise/` local y corran `streamlit run app/app.py`.
-   (La última celda opcional también abre la app desde Colab con un enlace temporal de Cloudflare.)
-
----
-
-## 3. Estructura
-
-```
-fuelwise/
-├── config.py                 # constantes, hiperparámetros y supuestos económicos (con fuentes)
-├── run_all.py                # orquesta todo el pipeline
-├── src/
-│   ├── download_data.py      # descarga y descomprime VED
-│   ├── preprocess.py         # filtro gasolina, Algoritmo 1 VED, pasos de 10 s, calidad, split
-│   ├── windows.py            # escalado (solo train) y ventanas sin fuga de información
-│   ├── models.py             # LSTM y GRU
-│   ├── train.py              # entrenamiento con early stopping
-│   ├── evaluate.py           # simulación por bloques, baselines, métricas, tiempo de inferencia
-│   ├── value_model.py        # función de valor, margen óptimo y curva valor-vs-error
-│   └── inference.py          # pronóstico de un trayecto individual (app)
-├── app/app.py                # aplicación Streamlit
-├── app/sample_trip.csv       # trayecto crudo de ejemplo (formato VED) para probar la carga de CSV
-├── notebooks/FuelWise_Colab.ipynb
-└── artifacts/                # modelos, métricas y predicciones (lo que usa la app)
+```bash
+python -m src.llm_eval
 ```
 
----
+Costó unos 0.45 USD, casi todo por Sonnet. `python -m src.llm_eval --configs reglas --no-demo` corre solo el baseline sin LLM, que no necesita llave.
 
-## 4. Metodología
+## Estructura
 
-### 4.1 Datos y verificación de mediciones de consumo
-- 264 vehículos ICE en los datos estáticos; 13.1 M registros OBD-II de esos vehículos.
-- **Hallazgo clave:** `Fuel Rate[L/hr]` está presente en solo el **0.01 %** de los registros ICE (1 vehículo,
-  que además es diésel). El paper de VED (Oh et al., 2022, Sección II.C) lo reporta: *"For most ICE vehicles
-  and HEVs, FuelRate ... is not available"* y propone el **Algoritmo 1**, que implementamos tal cual:
+| Archivo | Función |
+|---|---|
+| `src/download_data.py` | Descarga VED |
+| `src/preprocess.py` | Filtra gasolina, estima el consumo, agrega a pasos de 10 s, controla calidad y divide por vehículo |
+| `src/windows.py` | Escala con datos de entrenamiento y arma ventanas sin datos futuros |
+| `src/models.py`, `src/train.py` | LSTM, GRU y entrenamiento con early stopping |
+| `src/evaluate.py` | Simula el uso por bloques y calcula métricas contra las referencias |
+| `src/value_model.py` | Función de valor y margen de reserva |
+| `src/assistant.py` | Asistente: herramientas, prompts versionados, llamada a Claude y baseline de reglas |
+| `src/llm_eval.py` | Evaluación del asistente y caché para usar la app sin conexión |
+| `eval/llm_eval_set.json` | 40 preguntas de evaluación del asistente |
+| `app/app.py` | Aplicación Streamlit |
+| `config.py` | Hiperparámetros y supuestos económicos con su fuente |
+| `artifacts/` | Modelos, métricas e historial de iteraciones |
 
-  ```
-  correction = (1 + STFT/100 + LTFT/100) / AFR          AFR = 14.08 (E10)
-  si hay Fuel Rate → se usa
-  si no, si hay MAF → combustible[g/s] = MAF · correction
-  si no → MAF = Load/100 · ρ_aire · cilindrada · RPM / 120 ;  combustible = MAF · correction
-  FCR[L/h] = combustible[g/s] · 3600 / 745 g/L
-  ```
-  Fuentes del consumo en registros ICE: 10.40 M por MAF+trims, 2.09 M por carga·RPM·cilindrada, 0.64 M sin dato.
-- Se excluye el único ICE diésel (VehId 119).
-- Agregación a pasos de **10 s**; huecos ≤ 30 s se interpolan dentro del trayecto.
-- Filtro de calidad: trayectos ≥ 3 min y con ≥ 90 % de pasos con velocidad, RPM, carga y consumo válidos.
-- Resultado: **210 vehículos, 12 058 trayectos, 2 005 h de conducción, 7 659 L**.
+## Metodología
 
-### 4.2 División sin fuga de información
-- División **por vehículo** (70/15/15 → 147/32/31 vehículos; 8 884/1 330/1 844 trayectos), con trayectos
-  completos y **antes** de construir ventanas: ninguna ventana cruza conjuntos y los vehículos de prueba
-  nunca se ven en entrenamiento.
-- La estandarización (media/desviación) se ajusta solo con entrenamiento.
+1. **Datos.** Vehicle Energy Dataset, 264 vehículos de gasolina en Ann Arbor, 2017 a 2018. Solo el 0.01 % de los registros trae el flujo de combustible, así que el consumo se estima con el Algoritmo 1 del artículo de VED a partir de MAF y fuel trims.
+2. **Limpieza.** Pasos de 10 s, huecos de hasta 30 s interpolados, trayectos de 3 min o más con 90 % de datos válidos. Quedan 210 vehículos, 12 058 trayectos y 2 005 horas.
+3. **División por vehículo.** 70 % entrenamiento, 15 % validación y 15 % prueba. Los vehículos de prueba no se ven al entrenar y el escalado se ajusta solo con entrenamiento.
+4. **Pronóstico.** Cada 2 min el modelo recibe los últimos 3 min de velocidad, RPM, carga y consumo, y predice el consumo medio de los 2 min siguientes. No usa datos futuros.
+5. **Modelos.** LSTM y GRU de 2 capas y 64 unidades que aprenden la corrección sobre la persistencia. Adam, pérdida MSE y early stopping con el MAE de validación.
+6. **Referencias.** Promedio histórico del vehículo, que es como se decide hoy, y persistencia, que repite el consumo de los últimos 3 min.
 
-### 4.3 Pronóstico
-- Cada **2 min** se emite un pronóstico del consumo medio (L/h) de los **próximos 2 min**, usando solo los
-  **últimos 3 min** (18 pasos) de velocidad, RPM, carga y consumo. Nunca se usan valores futuros.
-  Al inicio del trayecto la historia faltante se rellena con ceros y una máscara `is_pad`.
-- Litros del trayecto = Σ (pronóstico L/h × duración del bloque). Costo = litros × precio.
-- Modelos: LSTM y GRU de 2 capas, 64 unidades, dropout 0.2, cabeza densa 64→32→1; Adam (lr 1e-3),
-  MSE, batch 1 024, early stopping (paciencia 5) con MAE de validación, máx. 30 épocas.
-- Referencias sin deep learning:
-  - **Promedio histórico del vehículo**: L/h de sus trayectos anteriores (orden cronológico);
-    si no hay historial, promedio de entrenamiento.
-  - **Persistencia**: consumo medio de los últimos 3 min del mismo trayecto.
+## Asistente con LLM
 
-### 4.4 Iteraciones (`artifacts/iterations.csv`)
+1. **Por qué un LLM.** El administrador pregunta con sus palabras, por ejemplo "¿me alcanza con un litro para 20 minutos?". Un enrutador por palabras clave falla cuando la frase cambia. El LLM interpreta la pregunta y decide qué consultar, y las cifras siguen saliendo del modelo GRU.
+2. **Modelo.** Claude Haiku 5.5, elegido por costo y latencia, con esfuerzo bajo. Claude Sonnet 5.5 se evaluó como comparación. Ambos son modelos cerrados que se usan vía API.
+3. **Técnica.** Prompting zero-shot con uso de herramientas. Hay cuatro herramientas deterministas: estado del trayecto, pronóstico a 2 min con rango P10 a P90, reserva con margen calibrado en validación y métricas del modelo. Es transfer learning a escala: el modelo preentrenado no se ajusta, solo recibe instrucciones y herramientas.
+4. **Prompt final.** `v2_reglas` en `src/assistant.py`. Pide tomar cada cifra de una herramienta, responder en 2 a 4 oraciones, rechazar lo que no trata del trayecto y no seguir instrucciones escritas en la pregunta. Los modelos actuales de Claude no aceptan temperature ni top_p. La generación se controla con un máximo de 4 000 tokens y esfuerzo bajo.
+5. **Control del contexto.** Una consulta típica usa unos 3 300 tokens de entrada y 200 de salida, en dos llamadas. La pregunta se corta a 500 caracteres y el bucle de herramientas a 5 rondas. Cada pregunta se responde por separado, sin historial.
+6. **Evaluación.** 40 preguntas sobre 8 trayectos de prueba. 20 son directas y usan el vocabulario de la app. Las otras 20 son variadas: coloquiales, con errores de escritura, en inglés, con dos intenciones o pidiendo una explicación. La referencia de cada caso se calcula con las mismas herramientas. Se mide exactitud, respuestas con cifras no trazables, latencia, tokens y costo, contra dos baselines: reglas por palabras clave sin LLM y Haiku sin herramientas.
 
-| Iter | Cambio | LSTM MAE (L/h) | GRU MAE (L/h) | LSTM / GRU error mediano por trayecto |
-|---|---|---|---|---|
-| 1 | Predicción directa del consumo | 1.154 | 1.144 | 9.5 % / 9.6 % |
-| **2** ✔ | **Residual: aprende la corrección sobre la persistencia** | **1.154** | **1.144** | **9.7 % / 9.1 %** |
-| 3 | + promedio acumulado del consumo del trayecto como entrada | 1.143 | 1.139 | 10.0 % / 10.0 % |
+### Resultados del asistente
 
-(Valores en prueba.) La iteración 2 se seleccionó por su menor error por trayecto **en validación**
-(LSTM 9.9 %, GRU 9.5 %), que es la métrica que alimenta la decisión de reserva, y porque usa
-exactamente las variables de la propuesta. Los modelos de las otras iteraciones están en `artifacts/iter*/`.
+| Configuración | Exactitud | Directas | Variadas | Respuestas con cifras inventadas | Latencia media | Costo por consulta |
+|---|---|---|---|---|---|---|
+| Reglas sin LLM | 67.5 % | 100 % | 35 % | 0 % | 0.005 s | 0 |
+| Haiku sin herramientas | 7.5 % | 10 % | 5 % | 65 % | 2.6 s | 0.0002 USD |
+| Haiku con prompt mínimo | 82.5 % | 85 % | 80 % | 17.5 % | 2.8 s | 0.0004 USD |
+| **Haiku con reglas, final** | **97.5 %** | **100 %** | **95 %** | **0 %** | **2.2 s** | **0.0004 USD** |
+| Sonnet 5.5 con reglas | 100 % | 100 % | 100 % | 0 % | 2.9 s | 0.0083 USD |
 
----
+1. Sin herramientas, Haiku no tiene los datos: se niega o inventa cifras en el 65 % de las respuestas.
+2. Las reglas por palabras clave aciertan todas las preguntas directas, pero solo el 35 % de las variadas. Se escribieron con las preguntas directas a la vista, así que ese 100 % es un techo optimista.
+3. El prompt final elimina las cifras inventadas. Con el prompt mínimo, Haiku calculaba por su cuenta datos como litros por 100 km o minutos de autonomía.
+4. Sonnet acierta una pregunta más, pero cuesta 19 veces más y tarda 0.7 s más. La app usa Haiku.
+5. La única falla del modelo final fue una pregunta con dos intenciones: respondió el pronóstico y omitió los litros consumidos.
+6. La primera versión del calificador marcaba como fallas respuestas correctas, por ejemplo al leer "1,844 trayectos" como 1.844 litros. Se corrigió, se revisaron a mano los casos que cambiaron y se volvió a calificar con `python -m src.llm_eval --regrade`, sin llamar otra vez al modelo. El detalle por caso está en `artifacts/llm/`.
 
-## 5. Resultados (conjunto de prueba: 31 vehículos no vistos, 1 844 trayectos, 10 172 pronósticos)
+## Resultados del pronóstico en prueba
 
-### Pronóstico de 2 min (L/h)
+31 vehículos no vistos, 1 844 trayectos y 10 172 pronósticos.
 
-| Método | MAE | RMSE | Sesgo |
+| Método | MAE L/h | RMSE L/h | Error mediano por trayecto |
 |---|---|---|---|
-| **GRU** | **1.144** | **1.613** | −0.150 |
-| LSTM | 1.154 | 1.632 | −0.185 |
-| Promedio histórico | 1.329 | 1.819 | +0.010 |
-| Persistencia | 1.395 | 1.914 | +0.014 |
+| **GRU** | **1.144** | **1.613** | 9.1 % |
+| LSTM | 1.154 | 1.632 | 9.7 % |
+| Promedio histórico | 1.329 | 1.819 | 14.1 % |
+| Persistencia | 1.395 | 1.914 | 4.8 % |
 
-GRU reduce el MAE **14 %** frente al promedio histórico y **18 %** frente a la persistencia.
+GRU reduce el MAE 14 % frente al promedio histórico y 18 % frente a la persistencia. Cada pronóstico tarda menos de 1 ms en CPU.
 
-### Litros por trayecto (integrando los pronósticos)
+En el total del trayecto gana la persistencia. Al sumar sus bloques reproduce el consumo real con 3 min de retraso, y sus errores se cancelan. Frente al promedio histórico, GRU baja el error mediano de 14.1 % a 9.1 %.
 
-| Método | MAE (L) | Error mediano | Error total de la flota |
+**Reserva.** Para cubrir el 95 % de los trayectos, el promedio histórico necesita reservar 58 % extra y GRU 29 %. El combustible sobrante baja de 411 L a 174 L por cada 1 000 trayectos. Los supuestos económicos están en `config.py` y se pueden cambiar en la app.
+
+## Iteraciones
+
+La selección se hizo con el error por trayecto en validación. El registro completo está en `artifacts/iterations.csv`.
+
+| Iteración | Cambio | MAE GRU en prueba | Error GRU por trayecto en validación |
 |---|---|---|---|
-| Persistencia | **0.035** | **4.8 %** | +0.8 % |
-| GRU | 0.072 | 9.1 % | −3.1 % |
-| LSTM | 0.078 | 9.7 % | −4.0 % |
-| Promedio histórico | 0.134 | 14.1 % | +0.6 % |
+| 1 | Predicción directa del consumo | 1.144 | 9.7 % |
+| **2, final** | Corrección sobre la persistencia | 1.144 | **9.5 %** |
+| 3 | Agrega el consumo promedio acumulado del trayecto | 1.139 | 9.9 % |
 
-**Interpretación honesta:** las redes son mejores pronosticando los próximos 2 minutos, pero al
-*integrar* pronósticos para el total del trayecto la persistencia gana. Razón: la persistencia es la
-señal real retrasada; al sumar sus bloques, cada paso real cuenta prácticamente una vez y los errores se
-cancelan. Las RNN tienden hacia el consumo promedio de la flota y tienen un sesgo negativo leve en
-vehículos nuevos, y esos errores no se cancelan. Frente al método de la propuesta (promedio histórico), las
-RNN sí mejoran: el error mediano baja de 14.1 % a 9.1 %.
+## Fallas observadas
 
-### Costo computacional (CPU)
+1. Al inicio del trayecto no hay historia y las redes quedan detrás del promedio histórico, con MAE de 1.39 frente a 1.35.
+2. En el 5 % de bloques con mayor consumo, GRU subestima 3.8 L/h en promedio.
+3. El 68 % de los vehículos de prueba tiene sesgo negativo. El modelo tiende al promedio de la flota.
 
-| Modelo | Parámetros | MFLOPs/pronóstico | Latencia (lote 1) | Entrenamiento |
-|---|---|---|---|---|
-| LSTM | 53 569 | 1.84 | 0.34 ms | 230 s (15 épocas) |
-| GRU | 40 705 | 1.38 | 0.76 ms | 319 s (23 épocas) |
+## Limitaciones
 
-### Impacto económico (margen elegido en validación, resultado en prueba)
-
-Supuestos por defecto (ajustables en la app): precio 1.128 USD/L; ahorro por acierto 100 USD; costo fijo de
-déficit 35 USD; costo de exceso 10 % del precio por litro sobrante.
-
-| Método | Margen | Cobertura | Emergencias | Sobrante/1 000 trayectos | Δ valor vs histórico / 1 000 trayectos |
-|---|---|---|---|---|---|
-| Persistencia | +94 % | 100 % | 0 | 654 L | +148 USD |
-| GRU | +145 % | 100 % | 0 | 941 L | +116 USD |
-| LSTM | +160 % | 99.95 % | 1 | 1 024 L | +33 USD |
-| Promedio histórico | +285 % | 100 % | 0 | 1 968 L | 0 |
-
-Con cobertura objetivo de 95 %, el margen necesario es +58 % con el promedio histórico, +29 % con GRU y
-+16 % con persistencia; el sobrante cae de 411 L a 174 L (GRU) por cada 1 000 trayectos.
-Como un déficit cuesta mucho más que un litro sobrante, el margen óptimo es alto y la diferencia en
-dólares por trayecto es pequeña. **Lo que mejora con una predicción más precisa es cuánto combustible
-hay que inmovilizar para lograr la misma cobertura.** No afirmamos ahorros verificados: son resultados
-bajo supuestos documentados.
-
----
-
-## 6. Supuestos y fuentes
-
-| Supuesto | Valor | Fuente |
-|---|---|---|
-| AFR estequiométrico E10 | 14.08 | Oh et al. (2022), VED, Algoritmo 1 |
-| Densidad de gasolina | 745 g/L | Supuesto (rango típico 0.72–0.77 kg/L) |
-| Densidad del aire (respaldo sin MAF) | 1.225 g/L | Atmósfera estándar |
-| Precio del combustible | 4.269 USD/gal = 1.128 USD/L | EIA, *Gasoline and Diesel Fuel Update*, regular Midwest (PADD 2), 26-oct-2026 |
-| Ahorro por acierto | 100 USD | Engineer Fix (dic-2025): cargo base no-miembro por falta de combustible 50–150 USD (punto medio) |
-| Costo fijo de déficit | 35 USD | Engineer Fix: recargos nocturnos/fin de semana 20–50 USD (punto medio) |
-| Prima por litro faltante | 0 | Engineer Fix: el combustible entregado se cobra a precio de mercado |
-| Costo de exceso | 10 % del precio por litro | Supuesto del equipo (capital inmovilizado) |
-
-## 7. Limitaciones
-- El "consumo real" es una estimación física (MAF y fuel trims), no una medición directa del flujo de combustible.
-- Datos de Ann Arbor (2017–2018): clima, tráfico y vehículos distintos a otros contextos; trayectos mayormente urbanos y cortos.
-- La integración de pronósticos usa la duración real del trayecto; no predice la duración.
-- No aplica a híbridos, eléctricos ni diésel.
+1. El consumo real es una estimación física, no una medición directa.
+2. Datos de una sola ciudad con trayectos cortos, de 10 min en promedio.
+3. No aplica a híbridos, eléctricos ni diésel.
+4. Los parámetros económicos son supuestos documentados.
+5. El asistente necesita internet y la API de Anthropic. Sin conexión solo muestra respuestas guardadas.
+6. Al asistente solo se envían la pregunta y cifras del trayecto, sin datos personales. No debe usarse para decisiones de seguridad del vehículo.
 
 ## Referencias
-- Oh, G. S., LeBlanc, D. J., & Peng, H. (2022). Vehicle Energy Dataset (VED). *IEEE T-ITS*, 23(4), 3302–3312. https://doi.org/10.1109/TITS.2020.3035596
-- Hochreiter, S., & Schmidhuber, J. (1997). Long short-term memory. *Neural Computation*, 9(8), 1735–1780.
-- Cho, K. et al. (2014). Learning phrase representations using RNN encoder–decoder. *EMNLP*, 1724–1734.
-- U.S. EIA. Gasoline and Diesel Fuel Update. https://www.eia.gov/petroleum/gasdiesel/
-- Engineer Fix. How Much Is Roadside Assistance for Gas? https://engineerfix.com/how-much-is-roadside-assistance-for-gas/
+
+1. Oh, G. S., LeBlanc, D. J., y Peng, H. 2022. Vehicle Energy Dataset, a large-scale dataset for vehicle energy consumption research. IEEE Transactions on Intelligent Transportation Systems, 23, 3302 a 3312. https://doi.org/10.1109/TITS.2020.3035596
+2. Hochreiter, S., y Schmidhuber, J. 1997. Long short-term memory. Neural Computation, 9, 1735 a 1780.
+3. Cho, K. et al. 2014. Learning phrase representations using RNN encoder-decoder for statistical machine translation. EMNLP, 1724 a 1734.
+4. U.S. EIA. Gasoline and Diesel Fuel Update. https://www.eia.gov/petroleum/gasdiesel/
+5. Engineer Fix. How Much Is Roadside Assistance for Gas? https://engineerfix.com/how-much-is-roadside-assistance-for-gas/
+6. Datos: https://github.com/gsoh/VED, licencia Apache 2.0.

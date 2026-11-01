@@ -1,4 +1,4 @@
-"""FuelWise AI — aplicación web (Streamlit).
+"""FuelWise AI: aplicación web en Streamlit.
 
 Ejecutar desde la carpeta raíz del proyecto:
     streamlit run app/app.py
@@ -15,6 +15,7 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import config as C  # noqa: E402
+from src import assistant  # noqa: E402
 from src.value_model import (ValueParams, error_value_curve, log_error_sigma,  # noqa: E402
                              outcome, value_curve)
 
@@ -78,7 +79,7 @@ RQ = residual_quantiles()
 # --------------------------------------------------------------------------
 st.sidebar.title("⛽ FuelWise AI")
 st.sidebar.caption("Pronóstico de consumo de combustible con LSTM y GRU sobre el Vehicle Energy Dataset.")
-model_sel = st.sidebar.selectbox("Modelo principal", ["lstm", "gru"], format_func=LABELS.get)
+model_sel = st.sidebar.selectbox("Modelo principal", ["gru", "lstm"], format_func=LABELS.get)
 baseline_sel = st.sidebar.selectbox("Método de referencia", ["hist", "persist"], format_func=LABELS.get)
 st.sidebar.markdown("### Supuestos económicos")
 currency = st.sidebar.text_input("Moneda", "USD")
@@ -101,7 +102,7 @@ def money(x):
     return f"{x:,.2f} {currency}"
 
 
-tabs = st.tabs(["🚗 Simulador de trayecto", "📈 Real vs predicho", "🧠 Rendimiento de modelos",
+tabs = st.tabs(["🚗 Simulador de trayecto", "💬 Asistente", "📈 Real vs predicho", "🧠 Rendimiento de modelos",
                 "💰 Impacto económico", "📂 Probar con tu CSV", "ℹ️ Datos y metodología"])
 
 
@@ -166,11 +167,13 @@ with tabs[0]:
     veh_opts = sorted(tt["veh"].unique())
     default_veh = int(tt.loc[(tt["duration_min"] - 20).abs().idxmin(), "veh"])
     veh = c1.selectbox("Vehículo", veh_opts, index=veh_opts.index(default_veh),
-                       format_func=lambda v: f"Vehículo {v} — {tt.loc[tt.veh == v, 'engine'].iloc[0]}"
+                       format_func=lambda v: f"Vehículo {v}, {tt.loc[tt.veh == v, 'engine'].iloc[0]}"
                        + ("" if tt.loc[tt.veh == v, 'vclass'].iloc[0] == "NO DATA"
                           else f" ({tt.loc[tt.veh == v, 'vclass'].iloc[0]})"))
     tv = tt[tt["veh"] == veh].sort_values("duration_min", ascending=False)
+    demo_veh, demo_trip, _ = assistant.demo_trip()
     trip = c2.selectbox("Trayecto", tv["trip"].tolist(),
+                        index=tv["trip"].tolist().index(demo_trip) if veh == demo_veh else 0,
                         format_func=lambda t: (lambda r: f"Trip {t} · {r.duration_min:.0f} min · "
                                                f"{r.distance_km:.1f} km")(tv[tv.trip == t].iloc[0]))
     bins = test_bins[(test_bins.veh == veh) & (test_bins.trip == trip)].sort_values("step")
@@ -202,9 +205,90 @@ with tabs[0]:
     c2.plotly_chart(cumulative_figure(blk, show), width="stretch")
 
 # --------------------------------------------------------------------------
-# 2. Real vs predicho
+# 2. Asistente con LLM
 # --------------------------------------------------------------------------
+@st.cache_data
+def demo_cache():
+    p = C.ART_DIR / "llm" / "demo_cache.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
+def answer_question(q, state):
+    """Respuesta en vivo si hay llave. Si no la hay o la API falla, usa la respuesta guardada."""
+    cached = demo_cache().get(f"{state.veh}|{state.trip}|{state.block}|{q}")
+    if assistant.has_api_key():
+        import anthropic
+        try:
+            return {**assistant.ask(q, state), "fuente": "en vivo"}
+        except anthropic.AuthenticationError:
+            return {"texto": "La llave de API no es válida. Revisa ANTHROPIC_API_KEY en el archivo .env.",
+                    "herramientas": [], "fuente": "error"}
+        except anthropic.APIError as e:
+            if cached:
+                return {**cached, "fuente": "guardada, la API no respondió"}
+            return {"texto": f"El asistente no respondió ({type(e).__name__}). Intenta de nuevo en unos segundos.",
+                    "herramientas": [], "fuente": "error"}
+    if cached:
+        return {**cached, "fuente": "guardada"}
+    return {"texto": "Sin conexión al LLM. En este modo solo hay respuestas guardadas para las preguntas "
+                     "sugeridas en el trayecto que la app abre por defecto.", "herramientas": [], "fuente": "sin conexión"}
+
+
 with tabs[1]:
+    st.header("Asistente de consumo")
+    st.write("Pregunta en español sobre el trayecto abierto en el simulador. Claude Haiku 5.5 interpreta la "
+             "pregunta y consulta el modelo GRU con herramientas. Todas las cifras salen de esas herramientas.")
+    state = assistant.TripState(int(veh), int(trip), int(now_block))
+    live = assistant.has_api_key()
+    st.caption(f"Contexto: vehículo {veh}, minuto {state.minute:.0f}. Cambia el trayecto o el minuto en el simulador. "
+               + ("Modo en vivo." if live else "Modo sin conexión: se muestran respuestas guardadas.")
+               + f" El costo usa el precio por defecto de {C.FUEL_PRICE_USD_L:.3f} USD/L.")
+    chat = st.session_state.setdefault("chat", [])
+    picked = None
+    for c, q in zip(st.columns(len(assistant.SUGGESTED)), assistant.SUGGESTED):
+        if c.button(q, width="stretch"):
+            picked = q
+    history = st.container()
+    typed = st.chat_input("Escribe tu pregunta")
+    question = typed or picked
+    if question:
+        with st.spinner("Consultando el modelo..."):
+            chat.append({"pregunta": question, "minuto": state.minute, **answer_question(question, state)})
+    with history:
+        for item in chat:
+            st.chat_message("user").write(item["pregunta"])
+            with st.chat_message("assistant"):
+                st.write(item["texto"])
+                if item["herramientas"]:
+                    with st.expander("Cómo se obtuvo la respuesta"):
+                        info = f"Fuente: {item['fuente']}. Minuto {item['minuto']:.0f} del trayecto."
+                        if item.get("latencia_s"):
+                            info += (f" Latencia {item['latencia_s']:.1f} s, "
+                                     f"{item['tokens_entrada'] + item['tokens_salida']:,} tokens, "
+                                     f"{item['costo_usd']:.5f} USD.")
+                        st.caption(info)
+                        for call in item["herramientas"]:
+                            st.markdown(f"**{call['name']}** `{json.dumps(call['input'], ensure_ascii=False)}`")
+                            st.json(call["output"], expanded=False)
+    if chat and st.button("Borrar conversación"):
+        st.session_state["chat"] = []
+        st.rerun()
+
+    llm_metrics = load_json("llm/metrics.json")
+    if llm_metrics:
+        with st.expander("Evaluación del asistente: 40 preguntas, 20 directas y 20 variadas"):
+            st.dataframe(pd.DataFrame([{
+                "Configuración": m["cambio"], "Modelo": m["modelo"], "Exactitud (%)": m["exactitud_pct"],
+                "Directas (%)": m["exactitud_directas_pct"], "Variadas (%)": m["exactitud_variadas_pct"],
+                "Con cifras no trazables (%)": m["respuestas_con_cifras_no_trazables_pct"],
+                "Latencia media (s)": m["latencia_media_s"], "Costo por consulta (USD)": m["costo_por_consulta_usd"]}
+                for m in llm_metrics.values()]).style.format(precision=3), hide_index=True, width="stretch")
+            st.caption("Detalle por caso en artifacts/llm/. Se reproduce con python -m src.llm_eval.")
+
+# --------------------------------------------------------------------------
+# 3. Real vs predicho
+# --------------------------------------------------------------------------
+with tabs[2]:
     st.header("Comparación entre consumo real y predicho (conjunto de prueba)")
     n = metrics["n_test"]
     st.caption(f"{n['vehicles']} vehículos no vistos · {n['trips']:,} trayectos · {n['blocks']:,} "
@@ -238,9 +322,9 @@ with tabs[1]:
     st.plotly_chart(fig, width="stretch")
 
 # --------------------------------------------------------------------------
-# 3. Rendimiento de modelos
+# 4. Rendimiento de modelos
 # --------------------------------------------------------------------------
-with tabs[2]:
+with tabs[3]:
     st.header("Rendimiento de los modelos LSTM y GRU")
     split = st.radio("Conjunto", ["test", "val"], horizontal=True,
                      format_func=lambda s: {"test": "Prueba", "val": "Validación"}[s])
@@ -280,7 +364,7 @@ with tabs[2]:
     bt = blocks_test.copy()
     bt["min_bin"] = pd.cut(bt["t"] * STEP_MIN, [-1, 2, 6, 12, 20, 30, 1e9],
                            labels=["0–2", "2–6", "6–12", "12–20", "20–30", ">30"])
-    err = bt.groupby("min_bin", observed=True).apply(
+    err = bt.groupby("min_bin", observed=True)[METHODS + ["real"]].apply(
         lambda g: pd.Series({LABELS[m]: np.mean(np.abs(g[m] - g["real"])) for m in METHODS}))
     fig = go.Figure([go.Bar(x=err.index.astype(str), y=err[LABELS[m]], name=LABELS[m], marker_color=COLORS[m])
                      for m in METHODS])
@@ -293,9 +377,9 @@ with tabs[2]:
         st.dataframe(pd.read_csv(it).fillna(""), hide_index=True, width="stretch")
 
 # --------------------------------------------------------------------------
-# 4. Impacto económico
+# 5. Impacto económico
 # --------------------------------------------------------------------------
-with tabs[3]:
+with tabs[4]:
     st.header("Impacto económico de mejorar las predicciones")
     st.markdown(
         "**Decisión:** reservar `R = P · (1 + m)` litros para cada trayecto, donde `P` es el consumo "
@@ -373,9 +457,31 @@ with tabs[3]:
             "según el error de predicción bajo esos supuestos.")
 
 # --------------------------------------------------------------------------
-# 5. CSV propio
+# 6. CSV propio
 # --------------------------------------------------------------------------
-with tabs[4]:
+def load_upload(up, disp):
+    """Lee y valida el CSV subido. Devuelve (pasos de 10 s, mensaje de error)."""
+    from src.preprocess import RAW_COLS, process_records_to_bins
+    raw = pd.read_csv(up).rename(columns=RAW_COLS)
+    missing = {"ts_ms", "speed", "rpm", "load"} - set(raw.columns)
+    if missing:
+        return None, f"Faltan columnas: {sorted(missing)}"
+    num = [c for c in RAW_COLS.values() if c in raw]
+    raw[num] = raw[num].apply(pd.to_numeric, errors="coerce")
+    raw = raw.dropna(subset=["ts_ms"])
+    if raw.empty:
+        return None, "La columna Timestamp(ms) no tiene valores numéricos."
+    raw["ts_ms"] = raw["ts_ms"] - raw["ts_ms"].min()
+    ub = process_records_to_bins(raw, disp)
+    if len(ub) < 2 or ub["fcr"].isna().all():
+        return None, "El trayecto es demasiado corto o no tiene datos de consumo válidos."
+    empty = [c for c in ["speed", "rpm", "load"] if ub[c].isna().all()]
+    if empty:
+        return None, f"Estas columnas no tienen valores numéricos: {empty}"
+    return ub, None
+
+
+with tabs[5]:
     st.header("Probar con tu propio trayecto")
     st.write("Sube un CSV de **un trayecto** con el formato de VED (registros OBD-II). Columnas mínimas: "
              "`Timestamp(ms)`, `Vehicle Speed[km/h]`, `Engine RPM[RPM]`, `Absolute Load[%]` y "
@@ -385,39 +491,31 @@ with tabs[4]:
         st.download_button("Descargar CSV de ejemplo", sample.read_bytes(), "sample_trip.csv", "text/csv")
     up = st.file_uploader("CSV del trayecto", type="csv")
     c1, c2 = st.columns(2)
-    disp = c1.number_input("Cilindrada del motor (L) — solo si no hay MAF", 0.6, 8.0, 2.0, 0.1)
+    disp = c1.number_input("Cilindrada del motor en litros, solo si no hay MAF", 0.6, 8.0, 2.0, 0.1)
     hist_rate = c2.number_input("Consumo promedio histórico de tu vehículo (L/h)", 0.1, 50.0,
                                 round(metrics["train_mean_rate_Lh"], 2), 0.1)
     if up is not None:
         from src.inference import forecast_trip
-        from src.preprocess import RAW_COLS, process_records_to_bins
         try:
-            raw = pd.read_csv(up).rename(columns=RAW_COLS)
-            need = {"ts_ms", "speed", "rpm", "load"}
-            missing = need - set(raw.columns)
-            if missing or not ({"maf", "fuel_rate"} & set(raw.columns) or "load" in raw):
-                st.error(f"Faltan columnas: {sorted(missing)}")
-                st.stop()
-            raw["ts_ms"] = raw["ts_ms"] - raw["ts_ms"].min()
-            ub = process_records_to_bins(raw, disp)
-            if len(ub) < 2 or ub["fcr"].isna().all():
-                st.error("El trayecto es demasiado corto o no tiene datos de consumo válidos.")
-                st.stop()
+            ub, msg = load_upload(up, disp)
+        except Exception as e:  # noqa: BLE001
+            ub, msg = None, f"No se pudo leer el archivo: {e}"
+        if msg:
+            st.error(msg)
+        else:
             models, scaler, residual = bundle()
             blk_u = forecast_trip(ub, models, scaler, residual, hist_rate)
-            nb = st.slider("Bloque actual", 0, len(blk_u) - 1, len(blk_u) - 1, key="ub")
+            nb = st.slider("Bloque actual", 0, len(blk_u) - 1, len(blk_u) - 1, key="ub") if len(blk_u) > 1 else 0
             st.plotly_chart(trip_figure(ub, blk_u, nb, [model_sel, baseline_sel]), width="stretch")
             rows = [{"Método": LABELS[m], "Litros": blk_u[f"L_{m}"].sum(),
                      f"Costo ({currency})": blk_u[f"L_{m}"].sum() * price} for m in ["real", model_sel, baseline_sel]]
             st.dataframe(pd.DataFrame(rows).style.format(precision=3), hide_index=True)
-            st.caption("'Real' = consumo estimado con el Algoritmo 1 de VED a partir de MAF/fuel trims.")
-        except Exception as e:  # noqa: BLE001
-            st.error(f"No se pudo procesar el archivo: {e}")
+            st.caption("Real es el consumo estimado con el Algoritmo 1 de VED a partir de MAF y fuel trims.")
 
 # --------------------------------------------------------------------------
-# 6. Datos y metodología
+# 7. Datos y metodología
 # --------------------------------------------------------------------------
-with tabs[5]:
+with tabs[6]:
     st.header("Datos, pipeline y supuestos")
     if quality:
         k = st.columns(5)
@@ -441,7 +539,8 @@ with tabs[5]:
       e [label="Filtro de calidad\\n≥90 % válido, ≥3 min"]; f [label="Split por vehículo\\n70/15/15"];
       g [label="Escalado (solo train)\\nVentanas 3 min → 2 min"]; h [label="LSTM / GRU\\n(+ baselines)"];
       i [label="Integrar pronósticos\\nlitros y costo"]; j [label="Modelo de valor\\nmargen de reserva"]; k [label="App Streamlit"];
-      a->b->c->d->e->f->g->h->i->j->k; }""")
+      l [label="Asistente Claude Haiku 5.5\\nherramientas sobre GRU"];
+      a->b->c->d->e->f->g->h->i->j->k; h->l->k; }""")
     st.markdown(f"""
 **Supuestos y fuentes**
 - Consumo: VED no reporta `Fuel Rate` para casi ningún vehículo de gasolina; se estima con el Algoritmo 1 de

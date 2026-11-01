@@ -6,3 +6,4 @@ py7zr>=0.20
 torch>=2.2
 streamlit>=1.50
 plotly>=5.20
+anthropic>=1.3
