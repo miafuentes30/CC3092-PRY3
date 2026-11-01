@@ -1,0 +1,1 @@
+{"residual": true, "features": ["speed", "rpm", "load", "fcr", "fcr_tripmean"]}

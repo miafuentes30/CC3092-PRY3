@@ -1,0 +1,4 @@
+iter,cambio,seleccionada,timestamp,target,features,lookback,horizon,hidden,layers,quick,lstm_block_MAE,lstm_block_RMSE,gru_block_MAE,gru_block_RMSE,hist_block_MAE,hist_block_RMSE,persist_block_MAE,persist_block_RMSE,lstm_trip_MAPE,gru_trip_MAPE,hist_trip_MAPE,persist_trip_MAPE
+1,Base: LSTM/GRU predicen L/h directamente,,2026-11-01 14:13,direct,speed+rpm+load+fcr,18,12,64,2,False,1.1535,1.6393,1.1444,1.6152,1.3288,1.8194,1.3948,1.9138,9.512,9.624,14.095,4.849
+2,Residual: aprenden la corrección sobre la persistencia,✔ (mejor MAPE por trayecto en validación),2026-11-01 14:25,residual,speed+rpm+load+fcr,18,12,64,2,False,1.1544,1.6321,1.1436,1.6126,1.3288,1.8194,1.3948,1.9138,9.71,9.112,14.095,4.849
+3,+ promedio acumulado del consumo del trayecto como entrada,,2026-11-01 14:33,residual,speed+rpm+load+fcr+fcr_tripmean,18,12,64,2,False,1.1434,1.6152,1.1385,1.6178,1.3288,1.8194,1.3948,1.9138,10.019,10.037,14.095,4.849

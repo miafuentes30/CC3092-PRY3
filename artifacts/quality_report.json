@@ -1,0 +1,37 @@
+{
+  "ice_vehicles_static": 264,
+  "ice_raw_records": 13129563,
+  "raw_coverage_frac": {
+    "speed": 0.9999,
+    "rpm": 0.9996,
+    "load": 0.8336,
+    "maf": 0.7923,
+    "fuel_rate": 0.0001,
+    "oat": 0.4152
+  },
+  "fcr_source_records": {
+    "Sin dato": 636470,
+    "Fuel Rate OBD": 1822,
+    "MAF + fuel trims": 10402218,
+    "Carga·RPM·cilindrada": 2089053
+  },
+  "trips_total": 18936,
+  "trips_short": 3523,
+  "trips_low_quality": 3355,
+  "trips_kept": 12058,
+  "vehicles_kept": 210,
+  "steps_kept": 721762,
+  "hours_kept": 2004.9,
+  "liters_kept": 7659.0,
+  "split_vehicles": {
+    "train": 147,
+    "val": 32,
+    "test": 31
+  },
+  "split_trips": {
+    "train": 8884,
+    "test": 1844,
+    "val": 1330
+  },
+  "step_s": 10
+}

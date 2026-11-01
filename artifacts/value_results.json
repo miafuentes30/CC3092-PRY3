@@ -1,0 +1,80 @@
+{
+  "params": {
+    "price": 1.1278,
+    "saving_hit": 100.0,
+    "deficit_fixed": 35.0,
+    "deficit_premium": 0.0,
+    "excess_frac": 0.1
+  },
+  "methods": {
+    "lstm": {
+      "margin_selected_on_val": 1.6,
+      "test": {
+        "margin": 1.6,
+        "value_per_trip": 99.81125083124792,
+        "value_total": 184051.94653282117,
+        "coverage_pct": 99.94577006507592,
+        "emergencies": 1,
+        "excess_L_per_trip": 1.0244613992248093,
+        "deficit_L_per_trip": 2.6642974528038904e-05,
+        "reserved_L_per_trip": 1.709195718414225,
+        "n_trips": 1844,
+        "gain_vs_hist_per_trip": 0.033212440572242485,
+        "gain_vs_hist_per_1000_trips": 33.212440572242485
+      },
+      "test_log_error_sigma": 0.16185773822714447
+    },
+    "gru": {
+      "margin_selected_on_val": 1.45,
+      "test": {
+        "margin": 1.45,
+        "value_per_trip": 99.89384314525554,
+        "value_total": 184204.24675985123,
+        "coverage_pct": 100.0,
+        "emergencies": 0,
+        "excess_L_per_trip": 0.9412737608126261,
+        "deficit_L_per_trip": 0.0,
+        "reserved_L_per_trip": 1.62603472297657,
+        "n_trips": 1844,
+        "gain_vs_hist_per_trip": 0.1158047545798695,
+        "gain_vs_hist_per_1000_trips": 115.8047545798695
+      },
+      "test_log_error_sigma": 0.15221406967644618
+    },
+    "hist": {
+      "margin_selected_on_val": 2.85,
+      "test": {
+        "margin": 2.85,
+        "value_per_trip": 99.77803839067568,
+        "value_total": 183990.70279240594,
+        "coverage_pct": 100.0,
+        "emergencies": 0,
+        "excess_L_per_trip": 1.9680937163001455,
+        "deficit_L_per_trip": 0.0,
+        "reserved_L_per_trip": 2.652854678464089,
+        "n_trips": 1844,
+        "gain_vs_hist_per_trip": 0.0,
+        "gain_vs_hist_per_1000_trips": 0.0
+      },
+      "test_log_error_sigma": 0.24779878687667417
+    },
+    "persist": {
+      "margin_selected_on_val": 0.94,
+      "test": {
+        "margin": 0.94,
+        "value_per_trip": 99.92623603627403,
+        "value_total": 184263.97925088933,
+        "coverage_pct": 100.0,
+        "emergencies": 0,
+        "excess_L_per_trip": 0.6540518152682411,
+        "deficit_L_per_trip": 0.0,
+        "reserved_L_per_trip": 1.338812777432185,
+        "n_trips": 1844,
+        "gain_vs_hist_per_trip": 0.14819764559835846,
+        "gain_vs_hist_per_1000_trips": 148.19764559835846
+      },
+      "test_log_error_sigma": 0.09143765212034194
+    }
+  },
+  "perfect_info_value_per_trip": 100.0
+}
