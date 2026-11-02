@@ -1,0 +1,10 @@
+{
+  "preguntas": 20,
+  "simultaneas": 5,
+  "errores": 0,
+  "duracion_total_s": 19.3,
+  "latencia_media_s": 3.71,
+  "latencia_p95_s": 6.46,
+  "latencia_max_s": 7.31,
+  "costo_total_usd": 0.0095
+}

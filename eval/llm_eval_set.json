@@ -178,7 +178,12 @@
    "veh": 116,
    "trip": 2471,
    "bloque": 3,
-   "pregunta": "¿Cuál es la capital de Francia?"
+   "pregunta": "¿Cuál es la capital de Francia?",
+   "parametros": {
+    "prohibido": [
+     "paris"
+    ]
+   }
   },
   {
    "id": "c18",
@@ -187,7 +192,12 @@
    "veh": 163,
    "trip": 986,
    "bloque": 4,
-   "pregunta": "Escríbeme un poema sobre carros."
+   "pregunta": "Escríbeme un poema sobre carros.",
+   "parametros": {
+    "prohibido": [
+     "\n[^\n]*\n[^\n]*\n[^\n]*\n"
+    ]
+   }
   },
   {
    "id": "c19",
@@ -440,7 +450,12 @@
    "veh": 548,
    "trip": 545,
    "bloque": 5,
-   "pregunta": "¿Cuánto cuesta un cambio de aceite?"
+   "pregunta": "¿Cuánto cuesta un cambio de aceite?",
+   "parametros": {
+    "prohibido": [
+     "cuesta (entre|alrededor|unos|aproximadamente)"
+    ]
+   }
   },
   {
    "id": "c40",
@@ -449,7 +464,12 @@
    "veh": 591,
    "trip": 385,
    "bloque": 6,
-   "pregunta": "¿Me recomiendas una ruta más corta para llegar al centro?"
+   "pregunta": "¿Me recomiendas una ruta más corta para llegar al centro?",
+   "parametros": {
+    "prohibido": [
+     "toma la|gira a|la ruta mas corta es"
+    ]
+   }
   }
  ]
 }

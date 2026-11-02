@@ -1,6 +1,7 @@
 config,cambio,modelo,prompt,n,exactitud_pct,exactitud_directas_pct,exactitud_variadas_pct,herramienta_correcta_pct,respuestas_con_cifras_no_trazables_pct,latencia_media_s,latencia_p95_s,tokens_entrada_medios,tokens_salida_medios,costo_por_consulta_usd,costo_total_usd,errores_api
 reglas,Baseline sin LLM: palabras clave y plantillas,sin LLM,,40,67.5,100.0,35.0,75.0,0.0,0.005,0.001,0,0,0.0,0.0,0
-haiku_sin_herramientas,Baseline LLM: Haiku sin acceso a los datos,claude-haiku-5-5,v0_sin_herramientas,40,7.5,10.0,5.0,,60.0,2.618,3.601,117,416,0.00021982,0.0087928,0
-haiku_v1,Haiku con herramientas y prompt mínimo,claude-haiku-5-5,v1_herramientas,40,82.5,85.0,80.0,100.0,17.5,2.823,5.139,2632,339,0.00043286,0.0173144,0
+haiku_sin_herramientas,Baseline LLM: Haiku sin acceso a los datos,claude-haiku-5-5,v0_sin_herramientas,40,5.0,5.0,5.0,,60.0,2.618,3.601,117,416,0.00021982,0.0087928,0
+haiku_v1,Haiku con herramientas y prompt mínimo,claude-haiku-5-5,v1_herramientas,40,77.5,75.0,80.0,100.0,17.5,2.823,5.139,2632,339,0.00043286,0.0173144,0
 haiku_v2,"Agrega reglas: cifras solo de herramientas, formato breve, rechazo fuera de alcance",claude-haiku-5-5,v2_reglas,40,97.5,100.0,95.0,96.4,0.0,2.159,3.477,3326,206,0.00043536749999999993,0.017414699999999998,0
 sonnet_v2,"Mismo prompt con Sonnet 5.5, modelo más grande",claude-sonnet-5-5,v2_reglas,40,100.0,100.0,100.0,100.0,0.0,2.892,4.058,3277,178,0.00833105,0.333242,0
+qwen_v2,"Mismo prompt con Qwen2.5 1.5B, modelo abierto local",Qwen/Qwen2.5-1.5B-Instruct,v2_reglas,40,40.0,55.0,25.0,39.3,15.0,2.563,4.42,1570,72,0.0,0.0,0

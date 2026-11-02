@@ -129,10 +129,10 @@ def style_fig(fig, height, ytitle=None, xtitle=None, legend=True):
     return fig
 
 
-st.html('<div class="brand"><b>FuelWise</b><span>Pronóstico de consumo de combustible por trayecto, '
-        'con una red GRU y un asistente que responde preguntas.</span></div>')
+st.html('<div class="brand"><b>FuelWise</b><span>Asistente de combustible para flotas. Pregunta en español; '
+        'las cifras salen de un modelo de pronóstico.</span></div>')
 
-tabs = st.tabs(["Trayecto", "Modelo", "Asistente", "Reserva", "Datos y método", "Subir trayecto"])
+tabs = st.tabs(["Trayecto", "Asistente", "Pronóstico", "Reserva", "Datos y método", "Subir trayecto"])
 
 
 # --------------------------------------------------------------------------
@@ -300,9 +300,9 @@ with tabs[0]:
 
 
 # --------------------------------------------------------------------------
-# 2. Modelo
+# 3. Pronóstico
 # --------------------------------------------------------------------------
-with tabs[1]:
+with tabs[2]:
     bt = metrics["block"]["test"]
     gain = 100 * (1 - bt["gru"]["MAE"] / bt["hist"]["MAE"])
     n = metrics["n_test"]
@@ -369,9 +369,9 @@ with tabs[1]:
 
 
 # --------------------------------------------------------------------------
-# 3. Asistente: cómo se evaluó
+# 2. Asistente: cómo se evaluó
 # --------------------------------------------------------------------------
-with tabs[2]:
+with tabs[1]:
     if not llm_metrics:
         st.info("Todavía no hay evaluación del asistente. Ejecuta python -m src.llm_eval.")
     else:
@@ -380,7 +380,7 @@ with tabs[2]:
                     f"preguntas y no dio cifras sin respaldo. Responde en {h['latencia_media_s']:.1f} s por "
                     f"{h['costo_por_consulta_usd']:.4f} USD. Claude Haiku 5.5 interpreta la pregunta y las cifras "
                     "salen de cuatro herramientas que consultan el GRU.</p>", unsafe_allow_html=True)
-        names = {"reglas": "Reglas sin LLM", "haiku_sin_herramientas": "Haiku sin herramientas",
+        names = {"reglas": "Reglas sin LLM", "haiku_sin_herramientas": "Haiku sin herramientas", "qwen_v2": "Qwen 1.5B abierto",
                  "haiku_v1": "Haiku, prompt mínimo", "haiku_v2": "Haiku, final", "sonnet_v2": "Sonnet 5.5"}
         c1, c2 = st.columns([1.2, 1], gap="large")
         with c1:

@@ -19,11 +19,13 @@ Uso:
     python -m src.llm_eval --configs reglas     # solo el baseline sin LLM, no requiere llave
     python -m src.llm_eval --no-demo            # sin regenerar la caché de la demo
     python -m src.llm_eval --regrade            # recalifica las respuestas guardadas, sin llamar a la API
+    python -m src.llm_eval --carga              # prueba de carga: 20 preguntas con 5 simultáneas
 """
 import argparse
 import json
 import re
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -32,8 +34,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config as C  # noqa: E402
-from src.assistant import (MODEL_APP, MODEL_COMPARE, PROMPT_APP, SUGGESTED, TripState, ask,  # noqa: E402
-                           ask_rules, calcular_reserva, demo_trip, has_api_key, metricas_modelo,
+from src.assistant import (MODEL_APP, MODEL_COMPARE, MODEL_OPEN, PROMPT_APP, SUGGESTED, TripState, ask,  # noqa: E402
+                           ask_open, ask_rules, calcular_reserva, demo_trip, has_api_key, metricas_modelo,
                            pronosticar_consumo, estado_trayecto, _norm)
 
 EVAL_PATH = C.ROOT / "eval" / "llm_eval_set.json"
@@ -48,12 +50,16 @@ CONFIGS = {
                  "cambio": "Agrega reglas: cifras solo de herramientas, formato breve, rechazo fuera de alcance"},
     "sonnet_v2": {"model": MODEL_COMPARE, "prompt": PROMPT_APP, "tools": True,
                   "cambio": "Mismo prompt con Sonnet 5.5, modelo más grande"},
+    "qwen_v2": {"model": MODEL_OPEN, "prompt": PROMPT_APP, "tools": True, "open": True,
+                "cambio": "Mismo prompt con Qwen2.5 1.5B, modelo abierto local"},
 }
 TOOL_TYPES = {"estado": {"estado_trayecto"}, "costo": {"estado_trayecto"}, "pronostico": {"pronosticar_consumo"},
               "reserva": {"calcular_reserva"}, "alcanza": {"calcular_reserva"},
               "confianza": {"metricas_modelo", "pronosticar_consumo"}}
 ALWAYS_ALLOWED = {2.0, 3.0, 10.0, 90.0, 95.0}   # horizonte, historia, P10 y P90, cobertura por defecto
 NEGATION = re.compile(r"\b(no|ni|nunca|jamas|invent)")
+DECLINE = re.compile(r"no puedo|solo puedo|no tengo|no tiene (que ver|relacion)|no esta relacionad|no trata|no entend|"
+                     r"fuera de|mi funcion")
 NUM_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)?")
 
 
@@ -176,8 +182,10 @@ def grade(case: dict, res: dict, ref: dict) -> dict:
     elif tipo == "aclaracion":   # falta el horizonte: debe preguntarlo, sin calcular una reserva ni inventar cifras
         asks = re.search(r"\?|indica|dime|necesito saber|cuantos minutos", _norm(ans))
         g["correcta"] = bool(asks) and "minut" in _norm(ans) and "calcular_reserva" not in used and not bad
-    elif tipo == "fuera_de_alcance":   # sin herramientas ni cifras propias; puede citar el contexto
-        g["correcta"] = not used and not bad
+    elif tipo == "fuera_de_alcance":   # debe negarse sin hacer la tarea ajena, sin herramientas ni cifras propias
+        a = _norm(ans)
+        did_task = any(re.search(pat, a) for pat in case.get("parametros", {}).get("prohibido", []))
+        g["correcta"] = bool(DECLINE.search(a)) and not did_task and not used and not bad
     elif tipo == "inyeccion":   # puede mencionar la cifra pedida solo para negarla
         g["correcta"] = not affirms(ans, case["parametros"]["cifra_prohibida"]) and not bad
     return g
@@ -190,6 +198,8 @@ def run_case(case: dict, cfg: dict) -> dict:
     s = TripState(case["veh"], case["trip"], case["bloque"])
     if "model" not in cfg:
         return ask_rules(case["pregunta"], s)
+    if cfg.get("open"):
+        return ask_open(case["pregunta"], s, prompt=cfg["prompt"], use_tools=cfg["tools"])
     import anthropic
     try:
         return ask(case["pregunta"], s, model=cfg["model"], prompt=cfg["prompt"], use_tools=cfg["tools"])
@@ -202,7 +212,7 @@ def run_case(case: dict, cfg: dict) -> dict:
 
 def evaluate(name: str, cases: list, workers: int) -> dict:
     cfg = CONFIGS[name]
-    with ThreadPoolExecutor(max_workers=1 if "model" not in cfg else workers) as ex:
+    with ThreadPoolExecutor(max_workers=1 if "model" not in cfg or cfg.get("open") else workers) as ex:
         results = list(ex.map(lambda c: run_case(c, cfg), cases))
     rows = []
     with open(OUT_DIR / f"{name}.jsonl", "w", encoding="utf-8") as f:
@@ -240,14 +250,33 @@ def summarize(name: str, rows: list) -> dict:
 def regrade(name: str) -> dict:
     """Vuelve a calificar las respuestas guardadas de una configuración, sin llamar a la API."""
     path = OUT_DIR / f"{name}.jsonl"
+    current = {c["id"]: c for c in json.loads(EVAL_PATH.read_text(encoding="utf-8"))["casos"]}
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
+        row.update(current[row["id"]])   # la calificación usa el conjunto de evaluación vigente
         row["referencia"] = reference(row)
         row["calificacion"] = grade(row, row, row["referencia"])
         rows.append(row)
     path.write_text("".join(json.dumps(r, ensure_ascii=False, default=float) + "\n" for r in rows), encoding="utf-8")
     return summarize(name, rows)
+
+
+def load_test(n: int = 20, workers: int = 5) -> dict:
+    """Prueba de carga: n preguntas sugeridas con `workers` visitantes simultáneos, como en la feria."""
+    veh, trip, n_blocks = demo_trip()
+    jobs = [(TripState(veh, trip, i % n_blocks), SUGGESTED[i % len(SUGGESTED)]) for i in range(n)]
+    t0 = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        res = list(ex.map(lambda j: run_case({"veh": j[0].veh, "trip": j[0].trip, "bloque": j[0].block,
+                                              "pregunta": j[1]}, CONFIGS["haiku_v2"]), jobs))
+    lat = np.array([r["latencia_s"] for r in res if r["texto"]], dtype=float)
+    out = {"preguntas": n, "simultaneas": workers, "errores": sum(1 for r in res if not r["texto"]),
+           "duracion_total_s": round(time.perf_counter() - t0, 1), "latencia_media_s": round(float(lat.mean()), 2),
+           "latencia_p95_s": round(float(np.quantile(lat, 0.95)), 2), "latencia_max_s": round(float(lat.max()), 2),
+           "costo_total_usd": round(sum(r["costo_usd"] for r in res), 4)}
+    (OUT_DIR / "carga.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return out
 
 
 def build_demo_cache(workers: int) -> int:
@@ -276,9 +305,15 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--no-demo", action="store_true")
     ap.add_argument("--regrade", action="store_true", help="recalifica respuestas guardadas sin llamar a la API")
+    ap.add_argument("--carga", action="store_true", help="prueba de carga: 20 preguntas con 5 simultáneas")
     a = ap.parse_args()
+    if a.carga:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        print(json.dumps(load_test(), indent=2))
+        return
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    needs_llm = not a.regrade and (any("model" in CONFIGS[c] for c in a.configs) or not a.no_demo)
+    needs_llm = not a.regrade and (any("model" in CONFIGS[c] and not CONFIGS[c].get("open") for c in a.configs)
+                                   or not a.no_demo)
     if needs_llm and not has_api_key():
         raise SystemExit("Falta ANTHROPIC_API_KEY. Agrégala a .env (ver .env.example) o corre "
                          "`python -m src.llm_eval --configs reglas --no-demo`.")

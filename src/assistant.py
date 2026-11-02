@@ -34,8 +34,10 @@ import config as C  # noqa: E402
 
 MODEL_APP = "claude-haiku-5-5"
 MODEL_COMPARE = "claude-sonnet-5-5"
+MODEL_OPEN = "Qwen/Qwen2.5-1.5B-Instruct"   # modelo abierto, Apache 2.0, corre local en GPU
 # USD por millón de tokens (entrada, salida). Los tokens de razonamiento se cobran como salida.
-PRICES = {"claude-haiku-5-5": (0.10, 0.50), "claude-sonnet-5-5": (2.00, 10.00)}
+# El modelo abierto no paga API: corre en la GPU local.
+PRICES = {"claude-haiku-5-5": (0.10, 0.50), "claude-sonnet-5-5": (2.00, 10.00), MODEL_OPEN: (0.0, 0.0)}
 EFFORT = "low"          # preguntas cortas con herramientas: menor latencia y costo
 MAX_TOKENS = 4000       # incluye el razonamiento adaptativo del modelo
 MAX_TURNS = 5           # límite de rondas de herramientas por pregunta
@@ -330,6 +332,68 @@ def ask(question: str, state: TripState, model: str = MODEL_APP, prompt: str = P
     return {"texto": text, "herramientas": calls, "latencia_s": round(time.perf_counter() - t0, 3),
             "tokens_entrada": tok_in, "tokens_salida": tok_out, "rondas": rounds,
             "costo_usd": cost_usd(model, tok_in, tok_out), "stop_reason": resp.stop_reason, "modelo": model}
+
+
+# --------------------------------------------------------------------------
+# Modelo abierto local con el mismo prompt y las mismas herramientas
+# --------------------------------------------------------------------------
+@lru_cache(maxsize=1)
+def load_open_model(model_id: str = MODEL_OPEN):
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    try:   # primero la caché local, para no depender de la red
+        tok = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+        model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype, local_files_only=True)
+    except OSError:
+        tok = AutoTokenizer.from_pretrained(model_id)
+        model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype)
+    return tok, model.to(device).eval()
+
+
+OPEN_TOOLS = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
+                                                 "parameters": t["input_schema"]}} for t in TOOLS]
+TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
+
+
+def ask_open(question: str, state: TripState, prompt: str = PROMPT_APP, use_tools: bool = True,
+             model_id: str = MODEL_OPEN) -> dict:
+    """Igual que ask(), con un modelo abierto local. Decodificación greedy y hasta 512 tokens por ronda."""
+    import torch
+    tok, model = load_open_model(model_id)
+    question = question.strip()[:MAX_QUESTION_CHARS]
+    messages = [{"role": "system", "content": SYSTEM[prompt]},
+                {"role": "user", "content": f"{state.context_line()}\n\nPregunta: {question}"}]
+    calls, tok_in, tok_out, rounds, text = [], 0, 0, 0, ""
+    t0 = time.perf_counter()
+    while True:
+        ids = tok.apply_chat_template(messages, tools=OPEN_TOOLS if use_tools else None, add_generation_prompt=True,
+                                      return_tensors="pt", return_dict=True).to(model.device)
+        with torch.no_grad():
+            out = model.generate(**ids, max_new_tokens=512, do_sample=False)
+        gen = out[0, ids["input_ids"].shape[1]:]
+        text = tok.decode(gen, skip_special_tokens=True).strip()
+        rounds += 1
+        tok_in += int(ids["input_ids"].shape[1])
+        tok_out += int(gen.shape[0])
+        found = TOOL_CALL_RE.findall(text) if use_tools else []
+        if not found or rounds >= MAX_TURNS:
+            break
+        messages.append({"role": "assistant", "content": text})
+        for raw in found:
+            try:
+                call = json.loads(raw)
+                name, args = call["name"], dict(call.get("arguments") or {})
+                out_tool = run_tool(state, name, args)
+            except (ValueError, TypeError, KeyError) as e:
+                name, args, out_tool = str(raw)[:40], {}, {"error": str(e)}
+            calls.append({"name": name, "input": args, "output": out_tool})
+            messages.append({"role": "tool", "content": json.dumps(out_tool, ensure_ascii=False)})
+    text = TOOL_CALL_RE.sub("", text).strip()
+    return {"texto": text, "herramientas": calls, "latencia_s": round(time.perf_counter() - t0, 3),
+            "tokens_entrada": tok_in, "tokens_salida": tok_out, "rondas": rounds, "costo_usd": 0.0,
+            "stop_reason": "end_turn", "modelo": model_id}
 
 
 # --------------------------------------------------------------------------
