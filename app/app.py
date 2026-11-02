@@ -526,19 +526,28 @@ def load_upload(up, disp):
     return ub, None
 
 
+# Trayectos de vehículos de prueba. El mixto es el registro OBD-II original; los demás se reconstruyeron desde los
+# pasos de 10 s, con el consumo estimado en la columna Fuel Rate.
+EXAMPLES = {"Mixto, 14 min, registro OBD-II original": "mixto_14min_original.csv",
+            "Urbano, 9 min a 20 km/h": "urbano_9min.csv",
+            "Carretera, 12 min a 89 km/h": "carretera_12min.csv",
+            "Largo, 43 min": "largo_43min.csv"}
+
 with tabs[5]:
-    st.markdown("<p class='lead'>Sube un CSV de un trayecto en formato VED para ver el pronóstico del GRU. Columnas "
-                "mínimas: Timestamp(ms), Vehicle Speed[km/h], Engine RPM[RPM], Absolute Load[%] y MAF[g/sec] o "
-                "Fuel Rate[L/hr].</p>", unsafe_allow_html=True)
-    sample = ROOT / "app" / "sample_trip.csv"
+    st.markdown("<p class='lead'>Pronóstico del GRU sobre un trayecto en formato VED. Prueba con un ejemplo o sube tu "
+                "propio CSV con las columnas Timestamp(ms), Vehicle Speed[km/h], Engine RPM[RPM], Absolute Load[%] y "
+                "MAF[g/sec] o Fuel Rate[L/hr].</p>", unsafe_allow_html=True)
+    source = st.segmented_control("Fuente", ["Un ejemplo", "Mi archivo"], default="Un ejemplo")
     c1, c2, c3 = st.columns([1.2, 1, 1])
-    up = c1.file_uploader("CSV del trayecto", type="csv")
+    if source == "Mi archivo":
+        up = c1.file_uploader("CSV del trayecto", type="csv")
+    else:
+        pick = c1.selectbox("Ejemplo", list(EXAMPLES))
+        up = ROOT / "app" / "examples" / EXAMPLES[pick]
+        c1.download_button("Descargar este CSV", up.read_bytes(), up.name, "text/csv", type="tertiary")
     disp = c2.number_input("Cilindrada en litros, si no hay flujo de aire", 0.6, 8.0, 2.0, 0.1)
     hist_rate = c3.number_input("Promedio histórico del vehículo, L/h", 0.1, 50.0,
                                 round(metrics["train_mean_rate_Lh"], 2), 0.1)
-    if sample.exists():
-        c1.download_button("Descargar un CSV de ejemplo", sample.read_bytes(), "sample_trip.csv", "text/csv",
-                           type="tertiary")
     if up is not None:
         from src.inference import forecast_trip
         try:
@@ -557,4 +566,5 @@ with tabs[5]:
             rows = [{"Método": LABELS[m], "Litros": blk_u[f"L_{m}"].sum(), f"Costo ({currency})": blk_u[f"L_{m}"].sum() * price}
                     for m in ["real", "gru", "hist"]]
             st.dataframe(pd.DataFrame(rows).style.format(precision=3), hide_index=True)
-            st.caption("Medido es el consumo estimado con el Algoritmo 1 de VED a partir del flujo de aire.")
+            st.caption("Medido es el consumo estimado con el Algoritmo 1 de VED, o el valor de Fuel Rate si el archivo "
+                       "lo trae.")
