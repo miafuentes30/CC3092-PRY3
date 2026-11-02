@@ -4,3 +4,7 @@ __pycache__/
 data/raw/
 data/processed/
 .ipynb_checkpoints/
+.venv
+FuelWise_Guion_Feria.pdf
+FuelWise_Guia_de_Uso.pdf
+

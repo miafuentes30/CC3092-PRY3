@@ -69,6 +69,7 @@ def readings(token: str) -> list:
 
 
 def number_tokens(text: str) -> list:
+    text = re.sub(r"(?m)^\s*\d+[.)]\s", "", text)               # la numeración de listas no es una cifra
     text = re.sub(r"(\d)[  ](\d{3})\b", r"\1\2", text)      # 1 844 se lee como 1844
     return [readings(m) for m in NUM_RE.findall(text)]
 

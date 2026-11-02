@@ -69,7 +69,7 @@
       "reserva": 0.0
     },
     "herramienta_correcta_pct": null,
-    "respuestas_con_cifras_no_trazables_pct": 65.0,
+    "respuestas_con_cifras_no_trazables_pct": 60.0,
     "latencia_media_s": 2.618,
     "latencia_p95_s": 3.601,
     "tokens_entrada_medios": 117,
